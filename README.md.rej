@@ -1,0 +1,24 @@
+diff a/README.md b/README.md	(rejected hunks)
+@@ -1 +1,20 @@
+-# temp2
+\ No newline at end of file
++# Patch Automation Script
++
++This repository contains a simple Python script to apply a git patch and
++push the resulting changes. The script tries to merge the patch using a
++3-way merge. If conflicts occur, it keeps the incoming changes from the
++patch and discards the existing lines.
++
++## Usage
++
++1. Place your patch file in this directory as `code.patch` (or specify a
++   different path when running the script).
++2. Run the script:
++
++```bash
++python3 apply_patch.py [path/to/patch]
++```
++
++After applying the patch and resolving conflicts, the script commits and
++pushes the changes to the current repository.
++

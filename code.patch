@@ -1,0 +1,818 @@
+diff --git a/routers/settings.py b/routers/settings.py
+index cafd5f1c9b7d613acd5a9f7c1e5ad91c61c1c60f..19fb87ef5d65226ab9186edbb796099d713152a0 100644
+--- a/routers/settings.py
++++ b/routers/settings.py
+@@ -1,261 +1,362 @@
+-#settings.py
++# settings.py
+ """Settings management routes."""
+ from __future__ import annotations
+ from typing import Dict, List
+ 
+ from fastapi import APIRouter, Request, Form, UploadFile, File
+ from datetime import datetime
+ from fastapi.responses import RedirectResponse
+ from fastapi.templating import Jinja2Templates
+ 
+ from core.config import (
+     PPE_ITEMS,
+     ANOMALY_ITEMS,
+     COUNT_GROUPS,
+     save_config,
+     load_branding,
+     save_branding,
+ )
+ from config import config
+ from modules.utils import require_roles
+ import json
+ from core.tracker_manager import (
+     reset_counts,
+     reset_nohelmet,
+     start_tracker,
+     stop_tracker,
+     save_cameras,
+ )
+ 
+ router = APIRouter()
+ 
++
+ def init_context(
+     config: dict,
+     trackers: Dict[int, "PersonTracker"],
+     cameras: List[dict],
+     redis_client,
+     templates_path: str,
+     config_path: str,
+     branding_file: str,
+ ):
+     """Store shared objects for settings routes."""
+     global cfg, trackers_map, cams, redis, templates, cfg_path, branding, branding_path
+     cfg = config
+     trackers_map = trackers
+     cams = cameras
+     redis = redis_client
+     templates = Jinja2Templates(directory=templates_path)
+     cfg_path = config_path
+     branding_path = branding_file
+     branding = load_branding(branding_file)
+ 
+-@router.get('/settings')
++
++@router.get("/settings")
+ async def settings_page(request: Request):
+-    res = require_roles(request, ['admin'])
++    res = require_roles(request, ["admin"])
+     if isinstance(res, RedirectResponse):
+         return res
+-    return templates.TemplateResponse('settings.html', {
+-        'request': request,
+-        'cfg': config,
+-        'now_ts': int(datetime.utcnow().timestamp()),
+-        'ppe_items': PPE_ITEMS,
+-        'anomaly_items': ANOMALY_ITEMS,
+-        'count_options': list(COUNT_GROUPS.keys()),
+-    })
+-
+-@router.post('/settings')
++    return templates.TemplateResponse(
++        "settings.html",
++        {
++            "request": request,
++            "cfg": config,
++            "now_ts": int(datetime.utcnow().timestamp()),
++            "ppe_items": PPE_ITEMS,
++            "anomaly_items": ANOMALY_ITEMS,
++            "count_options": list(COUNT_GROUPS.keys()),
++        },
++    )
++
++
++@router.post("/settings")
+ async def update_settings(request: Request):
+     global cfg, branding
+-    res = require_roles(request, ['admin'])
++    res = require_roles(request, ["admin"])
+     if isinstance(res, RedirectResponse):
+         return res
+     form = await request.form()
+     data = dict(form)
+-    if data.get('password') != cfg.get('settings_password'):
+-        return {'saved': False, 'error': 'auth'}
++    if data.get("password") != cfg.get("settings_password"):
++        return {"saved": False, "error": "auth"}
+     for key in [
+-        'max_capacity','warn_threshold','fps','skip_frames','line_ratio','v_thresh','debounce','retry_interval','conf_thresh','helmet_conf_thresh','detect_helmet_color','show_lines','show_ids','show_track_lines','show_counts','show_face_boxes','debug_logs','person_model','ppe_model','email_enabled','duplicate_filter_enabled','duplicate_filter_threshold','duplicate_bypass_seconds','max_retry','enable_live_charts','chart_update_freq','enable_profiling','profiling_interval','stream_mode','face_match_thresh','visitor_model','visitor_conf_thresh','visitor_sim_thresh','visitor_min_face_size','visitor_blur_thresh','visitor_size_thresh','visitor_fps_skip','enable_face_counting','face_count_conf','face_count_similarity','face_count_min_size']:
++        "max_capacity",
++        "warn_threshold",
++        "fps",
++        "skip_frames",
++        "line_ratio",
++        "v_thresh",
++        "debounce",
++        "retry_interval",
++        "conf_thresh",
++        "helmet_conf_thresh",
++        "detect_helmet_color",
++        "show_lines",
++        "show_ids",
++        "show_track_lines",
++        "show_counts",
++        "show_face_boxes",
++        "debug_logs",
++        "person_model",
++        "ppe_model",
++        "email_enabled",
++        "duplicate_filter_enabled",
++        "duplicate_filter_threshold",
++        "duplicate_bypass_seconds",
++        "max_retry",
++        "enable_live_charts",
++        "chart_update_freq",
++        "enable_profiling",
++        "profiling_interval",
++        "stream_mode",
++        "face_match_thresh",
++        "visitor_model",
++        "visitor_conf_thresh",
++        "visitor_sim_thresh",
++        "visitor_min_face_size",
++        "visitor_blur_thresh",
++        "visitor_size_thresh",
++        "visitor_fps_skip",
++        "enable_face_counting",
++        "face_count_conf",
++        "face_count_similarity",
++        "face_count_min_size",
++    ]:
+ 
+         if key in data:
+             val = data[key]
+-            if key in ['detect_helmet_color','show_lines','show_ids','show_track_lines','show_counts','show_face_boxes','email_enabled','duplicate_filter_enabled','enable_live_charts','debug_logs','enable_face_counting']:
+-                cfg[key] = bool(val) if isinstance(val, bool) else str(val).lower() in {'true','on','1'}
++            if key in [
++                "detect_helmet_color",
++                "show_lines",
++                "show_ids",
++                "show_track_lines",
++                "show_counts",
++                "show_face_boxes",
++                "email_enabled",
++                "duplicate_filter_enabled",
++                "enable_live_charts",
++                "debug_logs",
++                "enable_face_counting",
++            ]:
++                cfg[key] = (
++                    bool(val)
++                    if isinstance(val, bool)
++                    else str(val).lower() in {"true", "on", "1"}
++                )
+             else:
+                 cfg[key] = type(cfg.get(key, val))(val)
+-    track_ppe = form.getlist('track_ppe')
++    track_ppe = form.getlist("track_ppe")
+     if track_ppe:
+-        cfg['track_ppe'] = track_ppe
+-    alert_anom = form.getlist('alert_anomalies')
++        cfg["track_ppe"] = track_ppe
++    alert_anom = form.getlist("alert_anomalies")
+     if alert_anom:
+-        cfg['alert_anomalies'] = alert_anom
+-    preview_anom = form.getlist('preview_anomalies')
++        cfg["alert_anomalies"] = alert_anom
++    preview_anom = form.getlist("preview_anomalies")
+     if preview_anom:
+-        cfg['preview_anomalies'] = preview_anom
+-    track_objs = form.getlist('track_objects')
++        cfg["preview_anomalies"] = preview_anom
++    track_objs = form.getlist("track_objects")
+     if track_objs:
+-        cfg['track_objects'] = track_objs
+-    if 'face_match_thresh' in data:
+-        cfg['face_match_thresh'] = float(data['face_match_thresh'])
+-    if 'visitor_model' in data:
+-        cfg['visitor_model'] = data['visitor_model']
+-    if 'visitor_conf_thresh' in data:
+-        cfg['visitor_conf_thresh'] = float(data['visitor_conf_thresh'])
+-    if 'visitor_sim_thresh' in data:
+-        cfg['visitor_sim_thresh'] = float(data['visitor_sim_thresh'])
+-    if 'visitor_min_face_size' in data:
+-        cfg['visitor_min_face_size'] = int(data['visitor_min_face_size'])
+-    if 'visitor_blur_thresh' in data:
+-        cfg['visitor_blur_thresh'] = float(data['visitor_blur_thresh'])
+-    if 'visitor_size_thresh' in data:
+-        cfg['visitor_size_thresh'] = int(data['visitor_size_thresh'])
+-    if 'visitor_fps_skip' in data:
+-        cfg['visitor_fps_skip'] = int(data['visitor_fps_skip'])
+-    if 'enable_face_counting' in data:
+-        val = data['enable_face_counting']
+-        cfg['enable_face_counting'] = bool(val) if isinstance(val, bool) else str(val).lower() in {'true','on','1'}
+-    if 'face_count_conf' in data:
+-        cfg['face_count_conf'] = float(data['face_count_conf'])
+-    if 'face_count_similarity' in data:
+-        cfg['face_count_similarity'] = float(data['face_count_similarity'])
+-    if 'face_count_min_size' in data:
+-        cfg['face_count_min_size'] = int(data['face_count_min_size'])
+-    if 'visitor_mgmt' in data:
+-        cfg.setdefault('features', {})['visitor_mgmt'] = str(data['visitor_mgmt']).lower() in {'on','true','1'}
+-
+-    branding['company_name'] = data.get('company_name', branding.get('company_name',''))
+-    branding['site_name'] = data.get('site_name', branding.get('site_name',''))
+-    branding['print_layout'] = data.get('print_layout', branding.get('print_layout','A5'))
+-    branding['watermark'] = str(data.get('watermark','off')).lower() in {'on','true','1'}
+-    logo = form.get('logo')
+-    if logo and getattr(logo, 'filename', ''):
++        cfg["track_objects"] = track_objs
++    if "face_match_thresh" in data:
++        cfg["face_match_thresh"] = float(data["face_match_thresh"])
++    if "visitor_model" in data:
++        cfg["visitor_model"] = data["visitor_model"]
++    if "visitor_conf_thresh" in data:
++        cfg["visitor_conf_thresh"] = float(data["visitor_conf_thresh"])
++    if "visitor_sim_thresh" in data:
++        cfg["visitor_sim_thresh"] = float(data["visitor_sim_thresh"])
++    if "visitor_min_face_size" in data:
++        cfg["visitor_min_face_size"] = int(data["visitor_min_face_size"])
++    if "visitor_blur_thresh" in data:
++        cfg["visitor_blur_thresh"] = float(data["visitor_blur_thresh"])
++    if "visitor_size_thresh" in data:
++        cfg["visitor_size_thresh"] = int(data["visitor_size_thresh"])
++    if "visitor_fps_skip" in data:
++        cfg["visitor_fps_skip"] = int(data["visitor_fps_skip"])
++    if "enable_face_counting" in data:
++        val = data["enable_face_counting"]
++        cfg["enable_face_counting"] = (
++            bool(val)
++            if isinstance(val, bool)
++            else str(val).lower() in {"true", "on", "1"}
++        )
++    if "face_count_conf" in data:
++        cfg["face_count_conf"] = float(data["face_count_conf"])
++    if "face_count_similarity" in data:
++        cfg["face_count_similarity"] = float(data["face_count_similarity"])
++    if "face_count_min_size" in data:
++        cfg["face_count_min_size"] = int(data["face_count_min_size"])
++    if "visitor_mgmt" in data:
++        cfg.setdefault("features", {})["visitor_mgmt"] = str(
++            data["visitor_mgmt"]
++        ).lower() in {"on", "true", "1"}
++
++    branding["company_name"] = data.get(
++        "company_name", branding.get("company_name", "")
++    )
++    branding["site_name"] = data.get("site_name", branding.get("site_name", ""))
++    branding["print_layout"] = data.get(
++        "print_layout", branding.get("print_layout", "A5")
++    )
++    branding["watermark"] = str(data.get("watermark", "off")).lower() in {
++        "on",
++        "true",
++        "1",
++    }
++    logo = form.get("logo")
++    if logo and getattr(logo, "filename", ""):
+         from pathlib import Path
+-        dest_dir = Path('static/branding')
++
++        dest_dir = Path("static/branding")
+         dest_dir.mkdir(parents=True, exist_ok=True)
+-        ext = Path(logo.filename).suffix or '.png'
+-        path = dest_dir / f'logo{ext}'
+-        with path.open('wb') as f:
++        ext = Path(logo.filename).suffix or ".png"
++        path = dest_dir / f"logo{ext}"
++        with path.open("wb") as f:
+             f.write(await logo.read())
+-        branding['logo_url'] = f'/static/branding/{path.name}'
+-    cfg['branding'] = branding
++        branding["logo_url"] = f"/static/branding/{path.name}"
++    cfg["branding"] = branding
+     save_config(cfg, cfg_path, redis)
+     from config import set_config
++
+     set_config(cfg)
+     for tr in trackers_map.values():
+         tr.update_cfg(cfg)
+     from modules.profiler import start_profiler
++
+     start_profiler(cfg)
+-    return {'saved': True}
++    return {"saved": True}
++
+ 
+-@router.get('/settings/export')
++@router.get("/settings/export")
+ async def export_settings(request: Request):
+     """Download configuration and cameras as a single JSON payload."""
+-    res = require_roles(request, ['admin'])
++    res = require_roles(request, ["admin"])
+     if isinstance(res, RedirectResponse):
+         return res
+     from fastapi.responses import JSONResponse
++
+     data = {"config": cfg, "cameras": cams}
+     return JSONResponse(data)
+ 
+-@router.post('/settings/import')
++
++@router.post("/settings/import")
+ async def import_settings(request: Request):
+     """Import configuration and optional camera list."""
+-    res = require_roles(request, ['admin'])
++    res = require_roles(request, ["admin"])
+     if isinstance(res, RedirectResponse):
+         return res
+     data = await request.json()
+-    new_cfg = data.get('config', data)
+-    cams_data = data.get('cameras')
++    new_cfg = data.get("config", data)
++    cams_data = data.get("cameras")
+     cfg.update(new_cfg)
+     save_config(cfg, cfg_path, redis)
+     from config import set_config
++
+     set_config(cfg)
+     for tr in trackers_map.values():
+         tr.update_cfg(cfg)
+     from modules.profiler import start_profiler
++
+     start_profiler(cfg)
+     if isinstance(cams_data, list):
+         # stop existing trackers
+         for cid in list(trackers_map.keys()):
+             stop_tracker(cid, trackers_map)
+         cams[:] = cams_data
+         save_cameras(cams, redis)
+         for cam in cams:
+-            if cam.get('enabled', True):
++            if cam.get("enabled", True):
+                 start_tracker(cam, cfg, trackers_map, redis)
+-    return {'saved': True}
++    return {"saved": True}
++
+ 
+-@router.post('/reset')
++@router.post("/reset")
+ async def reset_endpoint():
+     reset_counts(trackers_map)
+-    return {'reset': True}
++    return {"reset": True}
++
+ 
+-@router.post('/reset_nohelmet')
++@router.post("/reset_nohelmet")
+ async def reset_nohelmet_endpoint():
+     reset_nohelmet(redis)
+-    return {'reset': True}
++    return {"reset": True}
+ 
+ 
+-@router.post('/license')
++@router.post("/license")
+ async def activate_license(request: Request):
+-    res = require_roles(request, ['admin'])
++    res = require_roles(request, ["admin"])
+     if isinstance(res, RedirectResponse):
+         return res
+     data = await request.json()
+-    key = data.get('key')
++    key = data.get("key")
+     from modules.license import verify_license
++
+     info = verify_license(key)
+-    if not info.get('valid'):
+-        return {'error': info.get('error')}
+-    cfg['license_key'] = key
+-    cfg['license_info'] = info
++    if not info.get("valid"):
++        return {"error": info.get("error")}
++    cfg["license_key"] = key
++    cfg["license_info"] = info
+     save_config(cfg, cfg_path, redis)
+-    redis.set('license_info', json.dumps(info))
++    redis.set("license_info", json.dumps(info))
+     from config import set_config
++
+     set_config(cfg)
+-    return {'activated': True, 'info': info}
++    return {"activated": True, "info": info}
+ 
+ 
+-@router.get('/settings/branding')
++@router.get("/settings/branding")
+ async def branding_page(request: Request):
+     """Redirect to settings page with branding tab."""
+-    res = require_roles(request, ['admin'])
++    res = require_roles(request, ["admin"])
++    if isinstance(res, RedirectResponse):
++        return res
++    return RedirectResponse("/settings?tab=branding")
++
++
++@router.get("/branding/preview")
++async def branding_preview(request: Request):
++    """Render standalone page to preview branding logo."""
++    res = require_roles(request, ["admin"])
+     if isinstance(res, RedirectResponse):
+         return res
+-    return RedirectResponse('/settings?tab=branding')
++    return templates.TemplateResponse(
++        "logo_preview.html", {"request": request, "cfg": cfg}
++    )
+ 
+ 
+-@router.post('/settings/branding')
++@router.post("/settings/branding")
+ async def branding_update(
+     request: Request,
+-    company_name: str = Form(''),
+-    site_name: str = Form(''),
+-    print_layout: str = Form('A5'),
+-    watermark: str = Form('off'),
++    company_name: str = Form(""),
++    site_name: str = Form(""),
++    print_layout: str = Form("A5"),
++    watermark: str = Form("off"),
+     logo: UploadFile | None = File(None),
+ ):
+     """Save branding configuration."""
+     global branding, cfg
+-    res = require_roles(request, ['admin'])
++    res = require_roles(request, ["admin"])
+     if isinstance(res, RedirectResponse):
+         return res
+-    branding['company_name'] = company_name
+-    branding['site_name'] = site_name
+-    branding['print_layout'] = print_layout
+-    branding['watermark'] = watermark in {'on', 'true', '1'}
++    branding["company_name"] = company_name
++    branding["site_name"] = site_name
++    branding["print_layout"] = print_layout
++    branding["watermark"] = watermark in {"on", "true", "1"}
+     if logo:
+         import os
+         from pathlib import Path
+-        dest_dir = Path('static/branding')
++
++        dest_dir = Path("static/branding")
+         dest_dir.mkdir(parents=True, exist_ok=True)
+-        ext = Path(logo.filename).suffix or '.png'
+-        path = dest_dir / f'logo{ext}'
+-        with path.open('wb') as f:
++        ext = Path(logo.filename).suffix or ".png"
++        path = dest_dir / f"logo{ext}"
++        with path.open("wb") as f:
+             f.write(await logo.read())
+-        branding['logo_url'] = f'/static/branding/{path.name}'
++        branding["logo_url"] = f"/static/branding/{path.name}"
+     save_branding(branding, branding_path)
+-    cfg['branding'] = branding
++    cfg["branding"] = branding
+     save_config(cfg, cfg_path, redis)
+     from config import set_config
+-    set_config(cfg)
+-    return {'saved': True}
+ 
++    set_config(cfg)
++    return {"saved": True}
+diff --git a/static/fd2ff1de.png b/static/fd2ff1de.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..ae88080fd6d9b2ef10f9f20d420b3a032687f95a
+GIT binary patch
+literal 908
+zcmeAS@N?(olHy`uVBq!ia0vp^CxAGBg9%7p=3o1qfq^;L)5S5QV$Rz;d%d#~We$8i
+zF65`*%xCJd<%X0?p4u(WRR<T?FA!;G<`s0QcT9Hleju?oL6G;5Vn^4p4332hSGI8|
+z@iZ^!=@GI#FMCeN?fa{}f7g9K_TAX_)#n4n4_2QSbnL$t#TdVK;XUaC-(4aE9BG3-
+zc5leJZRUH~#CQGm*L+4Z&zzsGqocE@{>As-{|mZ*$XBlV^VoF%{r^9H{E#+Y9pCYO
+z$+N{D9zIl*>*wd?bzOWh$87Z!ucbk?wY3KmK79C4keB!F=g-QNlqZ{?{;aVR>jo-`
+z(3y7r`TKY8jvYIuG|@w8Vn%lMZ;OZi>v+E|S^fC)&pVB&k?QK|QLlmE-o3cBrPbBH
+zFJHb4G(~A*h5hEFh1oSVHgo;5*Is`4<;W2i8@c;;?p%qwy)9Sb*m2I#JpTW)X7wLh
+zw{G3LcX{7W#^{w77A8i9Eex13YnGIpT-bgqE^BM+_3PI09ImLY=4N5y<>j3|eR^Bs
+zl+&s6&xh-XX{$Xc+Nod7|4{$awOtEh^yFn^OiWEJ`-*F7?%cSsW8c2Il9DYzuyyO!
+zZQH(mekv+E-AlFnfkof%ps5QV%ZGoq4YQEhmK&|Pb^m^Qd;53|5jHk9r-c`QzP)#E
+zUeKvRnd60a(RLOVFY4BxNikZM`R)7n_ix^4EX}!HHhI;I53{GYR;~W2v1jMbnRDjU
+zR91eh+I#x+=|+cy!otGp>f41fr#CHIzTDm2-B#}WyLan$Z&<oiRf1>N;{ppCW8>t=
+zu#FKpxw)~ivA`JcRh#U!GC*U?rcFil_4UADtaEaAZ$DA$93}hy{g!JdQ$D?U<C8u2
+zY?|^!k6QC){gAin(<T6e`sU4>&z?OCS_zEEs;a72J0xosTD7;n@4C;W*t9``Zs-yF
+Yk}dV0XJ)3F0&^LIr>mdKI;Vst0PpXr2mk;8
+
+literal 0
+HcmV?d00001
+
+diff --git a/templates/branding_settings.html b/templates/branding_settings.html
+index fe6133b7083bf2c9e0f7fd7786901a65a17ff9a3..6c4bf4fea40023d8938fafc387f200d0eb10ae3e 100644
+--- a/templates/branding_settings.html
++++ b/templates/branding_settings.html
+@@ -1,35 +1,34 @@
+ <!DOCTYPE html>
+ <html>
+ <head>
+     <title>Branding</title>
+     <link href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/flatly/bootstrap.min.css" rel="stylesheet">
+ </head>
+ <body class="pt-5">
+ {% include 'partials/header.html' %}
+ <div class="container mt-4">
+-  <h1 class="mb-4">Branding Setup</h1>
+   <div id="msg"></div>
+   <form id="brandForm" enctype="multipart/form-data">
+     <div class="mb-3">
+       <label class="form-label">Company Name</label>
+       <input type="text" name="company_name" class="form-control" value="{{ branding.company_name }}">
+     </div>
+     <div class="mb-3">
+       <label class="form-label">Site/Location Name</label>
+       <input type="text" name="site_name" class="form-control" value="{{ branding.site_name }}">
+     </div>
+     <div class="mb-3">
+       <label class="form-label">Company Logo</label>
+       <input type="file" name="logo" id="logoUploadInput" class="form-control">
+       {% if branding.logo_url %}<img src="{{ branding.logo_url }}" id="logoPreview" height="60" class="mt-2">{% else %}<img id="logoPreview" class="mt-2" style="display:none" height="60">{% endif %}
+     </div>
+     <div class="form-check mb-3">
+       <input class="form-check-input" type="checkbox" name="watermark" id="wm" {% if branding.watermark %}checked{% endif %}>
+       <label class="form-check-label" for="wm">Watermark</label>
+     </div>
+     <div class="mb-3">
+       <label class="form-label">Print Layout</label>
+       <select class="form-select" name="print_layout">
+         {% for opt in ['A4','A5','80mm'] %}
+         <option value="{{ opt }}" {% if branding.print_layout==opt %}selected{% endif %}>{{ opt }}</option>
+         {% endfor %}
+diff --git a/templates/logo_preview.html b/templates/logo_preview.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..0631b238f37dcb2e07b261125ee883e6f5c89140
+--- /dev/null
++++ b/templates/logo_preview.html
+@@ -0,0 +1,18 @@
++<!DOCTYPE html>
++<html>
++<head>
++    <title>Logo Preview</title>
++    <link href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/flatly/bootstrap.min.css" rel="stylesheet">
++</head>
++<body class="pt-5">
++{% include 'partials/header.html' %}
++<div class="container mt-4">
++  <h1 class="mb-3">Logo Preview</h1>
++  <div class="logo-wrapper mb-3" style="height:40px;overflow:hidden;">
++    <img id="headerLogo" src="/static/fd2ff1de.png" style="height:100%;object-fit:contain;" alt="Logo">
++  </div>
++  <input type="file" id="logoUploadInput" class="form-control" accept="image/*" onchange="previewLogo(this)">
++</div>
++<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
++</body>
++</html>
+diff --git a/templates/partials/header.html b/templates/partials/header.html
+index f9558612afae1f6f15a07b4ce5161fea231ee964..9fffa062ea0c1823ad85c8321dad77a273ae2c8f 100644
+--- a/templates/partials/header.html
++++ b/templates/partials/header.html
+@@ -1,63 +1,58 @@
+ <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+   <div class="container-fluid">
+     <a class="navbar-brand d-flex align-items-center" href="/">
+-      <div class="logo-wrapper me-2" style="height:36px;overflow:hidden;">
+-        <img id="headerLogo" src="{{ cfg.branding.logo_url or cfg.logo_url }}" alt="logo" style="height:100%;object-fit:contain;">
++      <div class="logo-wrapper me-2" style="height:40px;overflow:hidden;">
++        <img id="headerLogo" src="{{ cfg.branding.logo_url or cfg.logo_url }}" alt="Logo" style="height:100%;object-fit:contain;">
+       </div>
+       <span>Z-Eye System</span>
+     </a>
+     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+       <span class="navbar-toggler-icon"></span>
+     </button>
+     <div class="collapse navbar-collapse" id="navMenu">
+       <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-center">
+         <li class="nav-item"><a class="nav-link" href="/settings">Settings</a></li>
+         <li class="nav-item"><a class="nav-link" href="/settings/branding">Branding</a></li>
+         <li class="nav-item"><a class="nav-link" href="/alerts">Email/Alerts</a></li>
+         <li class="nav-item"><a class="nav-link" href="/report">Entry Exit Report</a></li>
+         {% if cfg.features.visitor_mgmt %}
+         <li class="nav-item"><a class="nav-link" href="/vms">VMS</a></li>
+         <li class="nav-item"><a class="nav-link" href="/manage_faces">Face DB</a></li>
+         {% endif %}
+         <li class="nav-item"><a class="nav-link" href="/ppe_report">PPE Report</a></li>
+         <li class="nav-item"><a class="nav-link" href="/cameras">Cameras</a></li>
+         <li class="nav-item ms-lg-3">
+           <button id="darkToggle" class="btn btn-sm btn-outline-light"><i class="bi-moon"></i></button>
+         </li>
+         <li class="nav-item"><a class="nav-link" href="/logout">Logout</a></li>
+       </ul>
+     </div>
+   </div>
+ </nav>
+ <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+ <script>
+ const body=document.body;
+ const btn=document.getElementById('darkToggle');
+ if(btn){
+   btn.addEventListener('click',()=>{
+     const d=body.classList.toggle('dark-mode');
+     localStorage.setItem('dark-mode',d);
+   });
+   if(localStorage.getItem('dark-mode')==='true'){
+     body.classList.add('dark-mode');
+   }
+ }
++function previewLogo(input){
++  const reader=new FileReader();
++  reader.onload=e=>{
++    document.getElementById('headerLogo').src=e.target.result;
++  };
++  if(input.files[0]){
++    reader.readAsDataURL(input.files[0]);
++  }
++}
+ const logoInput=document.getElementById('logoUploadInput');
+ if(logoInput){
+-  logoInput.addEventListener('change',e=>{
+-    const file=e.target.files[0];
+-    if(!file||!file.type.startsWith('image/')) return;
+-    const img=new Image();
+-    const reader=new FileReader();
+-    reader.onload=ev=>{
+-      img.onload=()=>{
+-        if(img.width<=300 && img.height<=100){
+-          document.getElementById('headerLogo').src=ev.target.result;
+-        }
+-      };
+-      img.src=ev.target.result;
+-    };
+-    reader.readAsDataURL(file);
+-  });
++  logoInput.addEventListener('change',e=>previewLogo(e.target));
+ }
+ </script>
+diff --git a/templates/vms_create.html b/templates/vms_create.html
+index 94f22d36811aa661aa274ccbba20e76ed1e556de..451057c80dcd5fdf8141477693ac21acc10d57c6 100644
+--- a/templates/vms_create.html
++++ b/templates/vms_create.html
+@@ -8,93 +8,100 @@
+     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tom-select/css/dist/css/tom-select.bootstrap5.min.css">
+     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.5/build/css/intlTelInput.css">
+     <link rel="stylesheet" href="https://leaverou.github.io/awesomplete/awesomplete.css" />
+     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+     <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.5.13/dist/cropper.min.js"></script>
+     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+     <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js" defer></script>
+     <script src="https://cdn.jsdelivr.net/npm/intl-tel-input@19.5.5/build/js/intlTelInput.min.js"></script>
+     <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+     <script src="https://leaverou.github.io/awesomplete/awesomplete.min.js"></script>
+ </head>
+ <body class="pt-5">
+ {% include 'partials/header.html' %}
+ <div class="container mt-4">
+   <h1 class="mb-4">Create Gate Pass</h1>
+   <div id="alertBox"></div>
+   <form id="vmsForm" enctype="multipart/form-data">
+     <div class="d-flex justify-content-end mb-2">
+       <button class="btn btn-success" id="saveBtn" type="submit">
+         <span id="saveSpinner" class="spinner-border spinner-border-sm me-2 d-none" role="status"></span>
+         Save Gate Pass
+       </button>
+     </div>
+     <div class="card mb-3">
+-      <div class="card-header">Visitor Info</div>
++      <div class="card-header">Visitor Details</div>
+       <div class="card-body">
+         <div class="row g-3">
+-          <div class="col-md-4 form-floating">
+-            <input class="form-control" name="name" id="nameInput" placeholder="Name" autocomplete="off" required>
+-            <label for="nameInput">Name *</label>
++          <div class="col-md-4">
++            <label class="form-label" for="nameInput">Name *</label>
++            <input class="form-control" name="name" id="nameInput" autocomplete="off" required>
+           </div>
+-          <div class="col-md-4 form-floating">
+-            <input class="form-control" name="phone" id="phoneInput" placeholder="Phone" autocomplete="tel" required>
+-            <label for="phoneInput">Phone *</label>
++          <div class="col-md-4">
++            <label class="form-label" for="phoneInput">Phone *</label>
++            <input class="form-control" name="phone" id="phoneInput" autocomplete="tel" required>
+           </div>
+-          <div class="col-md-4 form-floating">
+-            <input class="form-control" name="email" id="emailInput" placeholder="Email" autocomplete="email" required>
+-            <label for="emailInput">Email *</label>
++          <div class="col-md-4">
++            <label class="form-label" for="emailInput">Email *</label>
++            <input class="form-control" type="email" name="email" id="emailInput" autocomplete="email" required>
+           </div>
+-          <div class="col-md-4 form-floating">
+-            <input class="form-control" name="host" id="hostInput" placeholder="Host" autocomplete="off" required>
+-            <label for="hostInput">Host *</label>
+-          </div>
+-          <div class="col-md-4 form-floating">
+-            <input class="form-control" name="host_department" id="deptInput" placeholder="Department (Optional)" autocomplete="off">
+-            <label for="deptInput">Department</label>
+-          </div>
+-          <div class="col-md-4 form-floating">
+-            <input class="form-control" name="company_name" id="companyInput" placeholder="Visitor Company Name (Optional)" autocomplete="off">
+-            <label for="companyInput">Company</label>
+-          </div>
+-          <div class="col-md-4 form-floating">
++          <div class="col-md-4">
++            <label class="form-label" for="typeInput">Visitor Type *</label>
+             <select class="form-select" id="typeInput" name="visitor_type" required>
+               <option value="Official">Official</option>
+               <option>Personal</option>
+               <option>Vendor</option>
+               <option>Delivery</option>
+             </select>
+-            <label for="typeInput">Visitor Type *</label>
+           </div>
+-          <div class="col-md-4 form-floating">
+-            <input class="form-control" name="purpose" id="purposeInput" placeholder="Purpose" required>
+-            <label for="purposeInput">Purpose *</label>
++          <div class="col-md-4">
++            <label class="form-label" for="purposeInput">Purpose *</label>
++            <input class="form-control" name="purpose" id="purposeInput" required>
++          </div>
++          <div class="col-md-4">
++            <label class="form-label" for="companyInput">Company Name (Optional)</label>
++            <input class="form-control" name="company_name" id="companyInput" autocomplete="off">
++          </div>
++          <div class="col-md-4">
++            <label class="form-label" for="validInput">Valid Until *</label>
++            <input class="form-control" id="validInput" name="valid_to" required>
++          </div>
++        </div>
++      </div>
++    </div>
++    <div class="card mb-3">
++      <div class="card-header">Host Details</div>
++      <div class="card-body">
++        <div class="row g-3">
++          <div class="col-md-6">
++            <label class="form-label" for="hostInput">Host Name *</label>
++            <input class="form-control" name="host" id="hostInput" autocomplete="off" required>
+           </div>
+-          <div class="col-md-4 form-floating">
+-            <input class="form-control" id="validInput" name="valid_to" placeholder="Valid Until" required>
+-            <label for="validInput">Valid Until *</label>
++          <div class="col-md-6">
++            <label class="form-label" for="deptInput">Department (Optional)</label>
++            <input class="form-control" name="host_department" id="deptInput" autocomplete="off">
+           </div>
+         </div>
+       </div>
+     </div>
+     <div class="card mb-3">
+       <div class="card-header">Photo</div>
+       <div class="card-body">
+         <div class="mb-2 d-flex align-items-end">
+           <select id="camSelect" class="form-select me-2"></select>
+           <button class="btn btn-outline-primary" type="button" id="startCamBtn">Start Camera</button>
+         </div>
+         <input type="file" name="photo" id="photoInput" accept="image/*" class="form-control mb-2">
+         <input type="hidden" name="captured" id="captured">
+         <video id="cam" width="320" class="d-none mb-2" autoplay></video>
+         <img id="remote" width="320" class="d-none mb-2"/>
+         <div id="previewWrap" class="mb-2 d-none float-start me-3">
+           <img id="previewImg" class="img-thumbnail" width="320">
+         </div>
+         <div id="cropWrap" class="d-none mb-2 text-center">
+           <div id="cropGuide" class="small text-muted mb-1">Align face inside box</div>
+           <img id="cropImg" style="max-width:100%;margin:auto;display:block;">
+           <button type="button" class="btn btn-primary mt-2" id="saveCrop">Use Image</button>
+         </div>
+         <div class="mb-2">
+           <div class="btn-group" role="group">
+diff --git a/tests/test_settings_routes.py b/tests/test_settings_routes.py
+index 2954b86a6eee2ee8b2121973a053d6e6e482c8b3..5eda58dbd75f039643291d58541c3d8c1a1514ae 100644
+--- a/tests/test_settings_routes.py
++++ b/tests/test_settings_routes.py
+@@ -56,25 +56,33 @@ def test_update_and_export_import(tmp_path):
+     import json
+     data = json.loads(exp_resp.body.decode())
+     assert 'config' in data
+ 
+     imp_req = DummyRequest(json_data={'config': {'max_capacity': 70}, 'cameras': []})
+     res2 = asyncio.run(settings.import_settings(imp_req))
+     assert res2['saved']
+     assert cfg['max_capacity'] == 70
+ 
+ 
+ def test_misc_endpoints(tmp_path):
+     cfg, _ = setup_context(tmp_path)
+     assert asyncio.run(settings.reset_endpoint()) == {'reset': True}
+     assert asyncio.run(settings.reset_nohelmet_endpoint()) == {'reset': True}
+ 
+     lic = generate_license('default_secret', 1, 1, {'face_recognition': True}, client='T')
+     resp = asyncio.run(settings.activate_license(DummyRequest(json_data={'key': lic})))
+     assert resp['activated']
+     assert cfg['license_key'] == lic
+ 
+     b_req = DummyRequest(form={'company_name':'A','site_name':'B','print_layout':'A4','watermark':'on'})
+     resp2 = asyncio.run(settings.branding_update(b_req,
+         company_name='A', site_name='B', print_layout='A4', watermark='on', logo=None))
+     assert resp2['saved']
+     assert settings.branding['company_name'] == 'A'
++
++
++def test_branding_preview(tmp_path):
++    cfg, _ = setup_context(tmp_path)
++    (tmp_path/'logo_preview.html').write_text('hello')
++    resp = asyncio.run(settings.branding_preview(DummyRequest()))
++    from starlette.responses import Response as StarResponse
++    assert isinstance(resp, StarResponse)
